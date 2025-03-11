@@ -4,12 +4,14 @@ import fitz
 import cv2
 import os
 import mimetypes
-
+import uuid  
 api_id = "12799559"
 api_hash = "077254e69d93d08357f25bb5f4504580"
 bot_token = "7128064825:AAEw4sbn1nrZeRXDhMURe0t65bCV-pM0Crs"
 
 app = Client("screenshot_bot", api_id=api_id, api_hash=api_hash, bot_token=bot_token)
+
+user_preferences = {}
 
 def screenshot_document(file_path, max_pages=10):
     screenshots = []
@@ -52,11 +54,6 @@ def screenshot_video(file_path, max_frames=10):
         print(f"Failed to process video: {e}")
         return []
 
-
-global user_preferences
-user_preferences = {}
-
-
 @app.on_message(filters.document | filters.video | filters.photo | filters.audio | filters.animation)
 async def file_handler(client, message):
     file = message.document or message.video or message.photo or message.audio or message.animation
@@ -70,22 +67,31 @@ async def file_handler(client, message):
     mime_type, _ = mimetypes.guess_type(file_path)
     print(f"File MIME type: {mime_type}")
 
+    file_id = str(uuid.uuid4())[:8]
+    user_preferences[file_id] = file_path 
+
     await reply_message.edit_text("How do you want the screenshots sent?")
     
     buttons = [
-        [InlineKeyboardButton("📂 One by one", callback_data=f"one_by_one:{file_path}"),
-         InlineKeyboardButton("📁 As album", callback_data=f"album:{file_path}")]
+        [InlineKeyboardButton("📂 One by one", callback_data=f"one_by_one:{file_id}"),
+         InlineKeyboardButton("📁 As album", callback_data=f"album:{file_id}")]
     ]
     reply_markup = InlineKeyboardMarkup(buttons)
     await message.reply_text("Choose your preference:", reply_markup=reply_markup)
 
 @app.on_callback_query(filters.regex(r"^(one_by_one|album):(.+)$"))
 async def process_screenshots(client, callback_query):
-    choice, file_path = callback_query.data.split(":", 1)
+    choice, file_id = callback_query.data.split(":", 1)
+
+    file_path = user_preferences.pop(file_id, None)
+    if not file_path or not os.path.exists(file_path):
+        await callback_query.message.edit_text("File not found or expired.")
+        return
+
     await callback_query.message.edit_text("Processing file...")
-    
+
     mime_type, _ = mimetypes.guess_type(file_path)
-    
+
     if mime_type and mime_type.startswith("application/"):
         screenshots = screenshot_document(file_path)
     elif mime_type and mime_type.startswith("video/"):
@@ -115,6 +121,17 @@ async def process_screenshots(client, callback_query):
 
     await callback_query.message.delete()
 
+@app.on_message(filters.command("start"))
+async def start(client, message):
+    buttons = [
+        [InlineKeyboardButton("📂 Support Channel", url="https://t.me/THEHYBRIDS")],
+        [InlineKeyboardButton("ℹ️ Support Group", url="https://t.me/+SvDPfZF-JhdhN2E9")]
+    ]
+    reply_markup = InlineKeyboardMarkup(buttons)
+    await message.reply_text(
+        "Hello! I am your screenshot bot. Send me any file, and I will generate screenshots for you.",
+        reply_markup=reply_markup
+    )
 
 if __name__ == "__main__":
     app.run()
