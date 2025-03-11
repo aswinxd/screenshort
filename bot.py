@@ -1,18 +1,16 @@
 from pyrogram import Client, filters
-from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto
 import fitz
 import cv2
 import os
 import mimetypes
 
-# Replace these values with your own
-api_id = ""
-api_hash = ""
-bot_token = ""
+api_id = "12799559"
+api_hash = "077254e69d93d08357f25bb5f4504580"
+bot_token = "7128064825:AAEw4sbn1nrZeRXDhMURe0t65bCV-pM0Crs"
 
 app = Client("screenshot_bot", api_id=api_id, api_hash=api_hash, bot_token=bot_token)
 
-# Function to take multiple screenshots of a document
 def screenshot_document(file_path, max_pages=10):
     screenshots = []
     try:
@@ -28,7 +26,6 @@ def screenshot_document(file_path, max_pages=10):
         print(f"Failed to process document: {e}")
         return []
 
-# Function to take multiple screenshots of a video at regular intervals
 def screenshot_video(file_path, max_frames=10):
     screenshots = []
     try:
@@ -55,34 +52,14 @@ def screenshot_video(file_path, max_frames=10):
         print(f"Failed to process video: {e}")
         return []
 
-# Handler for the /start command
-@app.on_message(filters.command("start"))
-async def start(client, message):
-    buttons = [
-        [
-            InlineKeyboardButton("📣 Join my channel 📣", url="https://t.me/NT_BOT_CHANNEL"),
-            InlineKeyboardButton("👥 Support group 👥", url="https://t.me/NT_BOTS_SUPPORT"),
-        ],
-        [
-            InlineKeyboardButton("👩‍💻 Developer 👩‍💻", url="https://t.me/LISA_FAN_LK"),
-            InlineKeyboardButton("⛔️ Cancel ⛔️", callback_data="cancel"),
-        ]
-    ]
-    reply_markup = InlineKeyboardMarkup(buttons)
-    await message.reply_text("Hello! I am your screenshot bot. Send me a document or video file, and I will generate screenshots for you.", reply_markup=reply_markup)
 
-# Handler for the /help command
-@app.on_message(filters.command("help"))
-async def help(client, message):
-    await message.reply_text("Usage:\n\n"
-                             "1. Send a document (PDF, DOC, DOCX) to get screenshots of its pages.\n"
-                             "2. Send a video file (MP4, WEBM, MKV, AVI, MOV, WMV) to get screenshots from the video.\n"
-                             "3. I will process the file and upload the screenshots for you.")
+global user_preferences
+user_preferences = {}
 
-# Handler for file messages
-@app.on_message(filters.document | filters.video)
+
+@app.on_message(filters.document | filters.video | filters.photo | filters.audio | filters.animation)
 async def file_handler(client, message):
-    file = message.document or message.video
+    file = message.document or message.video or message.photo or message.audio or message.animation
     reply_message = await message.reply_text("Downloading file...")
     file_path = await app.download_media(file)
     
@@ -92,34 +69,52 @@ async def file_handler(client, message):
     
     mime_type, _ = mimetypes.guess_type(file_path)
     print(f"File MIME type: {mime_type}")
+
+    await reply_message.edit_text("How do you want the screenshots sent?")
     
-    if mime_type in ["application/pdf", "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"]:
-        await reply_message.edit_text("Processing document...")
+    buttons = [
+        [InlineKeyboardButton("📂 One by one", callback_data=f"one_by_one:{file_path}"),
+         InlineKeyboardButton("📁 As album", callback_data=f"album:{file_path}")]
+    ]
+    reply_markup = InlineKeyboardMarkup(buttons)
+    await message.reply_text("Choose your preference:", reply_markup=reply_markup)
+
+@app.on_callback_query(filters.regex(r"^(one_by_one|album):(.+)$"))
+async def process_screenshots(client, callback_query):
+    choice, file_path = callback_query.data.split(":", 1)
+    await callback_query.message.edit_text("Processing file...")
+    
+    mime_type, _ = mimetypes.guess_type(file_path)
+    
+    if mime_type and mime_type.startswith("application/"):
         screenshots = screenshot_document(file_path)
-    elif mime_type in ["video/mp4", "video/webm", "video/x-matroska", "video/avi", "video/quicktime", "video/x-msvideo", "video/x-ms-wmv"]:
-        await reply_message.edit_text("Processing video...")
+    elif mime_type and mime_type.startswith("video/"):
         screenshots = screenshot_video(file_path)
     else:
-        await reply_message.edit_text(f"Unsupported file type: {mime_type}")
+        await callback_query.message.edit_text(f"Unsupported file type: {mime_type}")
         os.remove(file_path)
         return
 
     os.remove(file_path)
 
-    if screenshots:
-        await reply_message.edit_text("Uploading screenshots...")
-        for screenshot_path in screenshots:
-            await app.send_photo(chat_id=message.chat.id, photo=screenshot_path)
-            os.remove(screenshot_path)
-        await reply_message.delete()
-        await message.delete()
-    else:
-        await reply_message.edit_text("Failed to process the file.")
+    if not screenshots:
+        await callback_query.message.edit_text("Failed to process the file.")
+        return
 
-@app.on_callback_query(filters.regex("cancel"))
-async def cancel(client, callback_query):
+    if choice == "one_by_one":
+        await callback_query.message.edit_text("Uploading screenshots one by one...")
+        for screenshot_path in screenshots:
+            await app.send_photo(chat_id=callback_query.message.chat.id, photo=screenshot_path)
+            os.remove(screenshot_path)
+    else:
+        await callback_query.message.edit_text("Uploading screenshots as an album...")
+        media_group = [InputMediaPhoto(screenshot) for screenshot in screenshots]
+        await app.send_media_group(chat_id=callback_query.message.chat.id, media=media_group)
+        for screenshot_path in screenshots:
+            os.remove(screenshot_path)
+
     await callback_query.message.delete()
 
-# Run the bot
+
 if __name__ == "__main__":
     app.run()
